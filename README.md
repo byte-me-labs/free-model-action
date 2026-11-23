@@ -1,30 +1,29 @@
 # free-model-action
 
-一个小型 GitHub Action 和 CLI，用于调用
-[`dsh-our-free-model`](https://github.com/Ebony-Vinyl/dsh-our-free-model) 暴露的两条免凭据模型车道：
+一个小型 GitHub Action 和 CLI，通过 **DeepSeek Harness 官方发行版（`dsh`）**
+调用 [`dsh-our-free-model`](https://github.com/Ebony-Vinyl/dsh-our-free-model)
+提供的免费模型车道。
 
-1. **Kilo 免费池** — `kilo-auto/free`，无需密钥，无需 Bun。
-2. **OpenCode 免费车道** — 默认 `deepseek-v4.1-flash-free`，无需密钥，
-   推理 POST 需要 Bun。
+运行时它做四件事：
 
-它是一次性调用器，不是 DSH 插件，也不是独立网关。输入一个 prompt，输出一个
-JSON 结果。无运行时依赖、无构建步骤、无账号、无密钥。
+1. 安装 `@deepseek-ai/dsh`（默认 `latest`）；
+2. 下载 `dsh-our-free-model` 最新的稳定 `vX.Y.Z` Release 包；
+3. 把插件装进 dsh 的 `headless` profile；
+4. 运行 `dsh --profile headless`，把最终答案和 JSON 事件流转成 action 输出。
 
-该 action 面向仓库内的 CI 工作：PR review、issue 分类、发布说明、changelog
-摘要。它**不是**通用模型 API —— GitHub Actions 没有入站 HTTP，上游免费车道
-也不是生产推理服务。
+**不 vendor、不重写上游的 wire layer、不提交同步 commit。** 免费车道的模型清单、
+配额策略、请求形状、故障切换都由 dsh 和插件负责；上游新增车道时，只要插件发布
+新版本，这里下一次运行就会用上。
 
-## 车道顺序
+## 车道与模型
 
-`lane: auto` 先试 Kilo，再试 OpenCode。
+| `lane` | 交给插件的选择 | 说明 |
+| --- | --- | --- |
+| `auto`（默认） | `combo:gha` | 先试 `kilo-auto/free`，失败后依次尝试 `deepseek-v4.1-flash-free`、`glm-5.3-flash-free`。切换由插件自己的 fallback 路由完成。 |
+| `kilo` | `kilo-auto/free` | 无需 Bun。 |
+| `opencode` | `deepseek-v4.1-flash-free` | 需要 Bun。 |
 
-| 顺序 | 车道 | 默认模型 | 说明 |
-| --- | --- | --- | --- |
-| 1 | Kilo | `kilo-auto/free` | 无指纹、无需 Bun。在共享 GitHub 托管 runner IP 上最可能存活的车道。 |
-| 2 | OpenCode | `deepseek-v4.1-flash-free` | 模型清单更好，但按 IP/会话的门槛更严。需要 Bun。 |
-
-429、403、地区拒绝、传输失败、超时、服务端错误或空回答，都会切到下一条车道
-**一次**。同一车道不重试：配额拒绝是一个窗口，不是瞬时抖动。
+`model` 输入可以直接指定模型 id 或 combo id，覆盖 `lane` 的选择。
 
 ## 快速开始
 
@@ -55,8 +54,24 @@ jobs:
 如果本目录就是仓库根目录，使用 `uses: ./`；如果它是大仓库的子目录，使用
 `uses: ./free-model-action`。
 
-action 默认安装 Node 22 和 Bun。调用方已提供时，设置
-`setup-node: 'false'` 或 `install-bun: 'false'`。
+action 默认安装 Node 24 和 Bun，并自行安装 dsh 与插件。首次运行大约需要
+1 分钟（主要是 npm 全局安装）；同一个 job 内再次调用 action 会跳过 dsh 的
+重复安装，插件仍会按当前 `plugin-tag` 重新安装。
+
+### 固定版本
+
+默认 `dsh-version: latest`、`plugin-tag: latest`，即跟随上游最新发行。CI 需要
+可复现时，把两者钉死：
+
+```yaml
+with:
+  dsh-version: '0.2.2-rc.5'
+  plugin-tag: 'v2.9.0'
+```
+
+`plugin-tag` 只接受稳定的 `vX.Y.Z`；传 `latest` 时，action 自己列出上游
+Release 并取最高的稳定版本，不使用 `/releases/latest`（上游会在稳定版之后发布
+`*-macos-unofficial`，那个接口可能指向非官方构建）。
 
 ### PR review 形态
 
@@ -100,166 +115,154 @@ steps:
 `soft-fail` 默认 `true`，因此车道故障不会让 CI 失败。发布前检查
 `outputs.ok`。生成的 `comment-file` 已去除控制字符并中和 `@` 提及。
 
-## CLI
+## 输入
 
-同一个调用器可在本地使用。需要 Node 22.19+ 或 24+（action 安装 Node 22），
-并且只有在带 `--live` 时才会消耗车道配额。同时给出 `--prompt` 和
-`--prompt-file` 时，文件优先；`--system` 和 `--system-file` 同理。
+| 输入 | 默认 | 说明 |
+| --- | --- | --- |
+| `lane` | `auto` | `auto`、`kilo` 或 `opencode`。 |
+| `model` | 空 | 显式模型 id 或 combo id，覆盖 `lane`。 |
+| `prompt` | 空 | Prompt 文本；大输入用 `prompt-file`。 |
+| `prompt-file` | 空 | UTF-8 文件；优先于 `prompt`。 |
+| `system` | 空 | 前置到任务前的指令。 |
+| `system-file` | 空 | 指令文件；优先于 `system`。 |
+| `max-output-tokens` | `1200` | 写入插件 `defaultMaxTokens`。 |
+| `max-input-chars` | `60000` | 脱敏后的 prompt 字符上限。 |
+| `timeout-ms` | `180000` | 整次 dsh 运行的超时。 |
+| `permission-mode` | `read-only` | dsh 权限预设：`read-only`、`workspace-write`、`danger-full-access`。 |
+| `soft-fail` | `true` | 车道失败时仍以 0 退出。 |
+| `dsh-version` | `latest` | `@deepseek-ai/dsh` 的 npm 版本或 dist-tag。 |
+| `plugin-tag` | `latest` | 插件 Release tag，或 `latest`。 |
+| `setup-node` | `true` | 用 actions/setup-node 安装 Node 24。 |
+| `install-bun` | `true` | 用 oven-sh/setup-bun 安装 Bun。 |
 
-```bash
-# Kilo
-node scripts/gha-call.mjs --live --lane kilo \
-  --prompt 'Do not use tools. Reply with exactly: PONG' \
-  --max-output-tokens 64 --out result.json
+`dsh` 要求 Node **24.9.0** 或更高。`setup-node: 'false'` 时，调用方必须自己
+提供满足要求的 Node。
 
-# OpenCode（需要 Bun）
-node scripts/gha-call.mjs --live --lane opencode \
-  --prompt-file prompt.txt --out result.json
+## 输出
 
-# 自动 + 软失败
-node scripts/gha-call.mjs --live --lane auto --prompt-file prompt.txt --soft-fail
-```
-
-OpenCode 需要 Bun。用 `npm i -g bun` 安装，或把 `OUR_FREE_MODEL_BUN` 指向
-可执行文件。action 的 smoke workflow 通过 `oven-sh/setup-bun` 安装。
-
-退出码：
-
-| 码 | 含义 |
+| 输出 | 说明 |
 | --- | --- |
-| `0` | 某条车道给出回答，或设置了 `--soft-fail` 且所有车道都失败。 |
-| `1` | 所有车道都失败且未设置 `--soft-fail`。 |
-| `2` | 用法/配置错误、缺少 `--live`，或不支持的环境。 |
-
-### 请求 JSON
-
-`--request request.json` 接受：
-
-```json
-{
-  "lane": "auto",
-  "model": null,
-  "system": "Optional system instruction",
-  "prompt": "Required prompt",
-  "maxOutputTokens": 1200,
-  "timeoutMs": 180000,
-  "maxInputChars": 60000,
-  "sessionSeed": "optional stable seed",
-  "listing": true,
-  "softFail": true
-}
-```
-
-CLI 标志覆盖文件。`--model` 需要 `--lane kilo` 或 `--lane opencode`；`auto`
-会为每条车道各选一个默认模型。只支持 chat-wire 模型，因为调用器只构造一种
-Chat 请求体。
+| `ok` | dsh 正常结束且答案非空时为 `true`。 |
+| `lane` | 请求的车道：`auto`、`kilo` 或 `opencode`。 |
+| `model` | 交给插件的模型或 combo id。 |
+| `text` | 答案文本。 |
+| `finish` | dsh 终止原因：`completed`、`error` 或 `aborted`。 |
+| `result-file` | 结果 JSON 的绝对路径。 |
+| `comment-file` | `ok=true` 时已清洗的评论正文路径。 |
+| `plugin-tag` | 实际使用的插件 Release tag。 |
 
 ### 结果 JSON
 
 ```json
 {
   "ok": true,
-  "lane": "kilo",
-  "model": "kilo-auto/free",
-  "modelSource": "listing",
+  "lane": "auto",
+  "model": "combo:gha",
+  "modelSource": "combo",
   "text": "PONG",
-  "finish": "stop",
+  "finish": "completed",
   "truncated": false,
-  "usage": { "inputTokens": 36, "outputTokens": 16, "totalTokens": 52 },
-  "elapsedMs": 3994,
+  "usage": { "inputTokens": 10696, "outputTokens": 4, "totalTokens": 10700 },
+  "elapsedMs": 3873,
   "attempts": [
-    { "lane": "kilo", "model": "kilo-auto/free", "ok": true, "status": 200 }
+    { "lane": "auto", "model": "combo:gha", "ok": true, "status": null, "elapsedMs": 3873 }
   ],
   "redactions": 0,
   "inputTruncated": false,
   "inputOmittedChars": 0,
-  "at": "2026-11-23T05:08:00.000Z"
+  "sessionId": "session-…",
+  "at": "2026-11-23T06:33:39.805Z"
 }
 ```
 
-失败时 `ok` 为 `false`，`code` 是最后一条车道的分类，`attempts` 包含所有
-尝试过的车道。即使使用错误也会写出结果，因此 workflow 总能检查它。
+失败时 `ok` 为 `false`，并带 `code` 和 `message`。原始 dsh 事件流会写到
+`$RUNNER_TEMP/free-model-action/events.ndjson`，smoke workflow 会把它作为
+artifact 上传。
 
-## 失败码
+### 失败码
 
-| 码 | 含义 | 下一步 |
-| --- | --- | --- |
-| `RATE_LIMIT` | 该出口/会话遇到 429 配额窗口。 | 换下一条车道；不要立即重试。 |
-| `LANE_LOCKED` | 403 `FreeTierError`；网关拒绝了这个客户端。 | 换下一条车道；若持续出现，检查 vendored 的 `o2a.js`。 |
-| `REGION_BLOCKED` | 车道拒绝该出口地区。 | 换下一条车道；更换 runner IP 可能有用。 |
-| `TRANSPORT` | 网络、代理或缺少 Bun。 | 修复环境，然后换下一条车道。 |
-| `TIMEOUT` | 单条车道的预算耗尽。 | 调高 `timeout-ms` 或缩短 prompt。 |
-| `SERVER` | 上游 5xx。 | 稍后换下一条车道。 |
-| `CLIENT_ERROR` | 请求/模型缺陷。 | 修正模型 id 或请求体。 |
-| `EMPTY_RESPONSE` | 只有 reasoning 或工具调用，没有回答文本。 | 加上 "do not use tools"，并给模型更多输出预算。 |
-| `USAGE_ERROR` | 标志错误、缺少 prompt、不支持的 Node。 | 修正调用方式。 |
-| `LIVE_REQUIRED` | 未传 `--live`。 | 传入 `--live`。 |
+| 码 | 说明 |
+| --- | --- |
+| `RATE_LIMIT` | 当前出口遇到 429 配额窗口。 |
+| `TRANSPORT` | 网络、代理或缺少 Bun。 |
+| `TIMEOUT` | 整次运行超时。 |
+| `SERVER` | 上游 5xx。 |
+| `EMPTY_RESPONSE` | dsh 正常结束但没有答案文本。 |
+| `DSH_EXIT_<n>` | dsh 以非 0 退出且没有给出更具体的错误码。 |
+| `DSH_ERROR` | dsh 给出了错误终止原因但没有错误码。 |
+
+`code` 直接来自 dsh/插件的错误分类；上表是常见值，不是封闭集合。
+
+## CLI
+
+CLI 需要自行准备 dsh 和插件（action 会自动做这些）：
+
+```bash
+npm install --global @deepseek-ai/dsh pnpm
+gh release download v2.9.0 \
+  --repo Ebony-Vinyl/dsh-our-free-model \
+  --pattern 'dsh-our-free-model-*.tgz' --dir /tmp/ofm-plugin
+dsh plugin --profile headless add /tmp/ofm-plugin/dsh-our-free-model-2.9.0.tgz
+
+node scripts/dsh-call.mjs --lane auto \
+  --prompt-file prompt.txt --out result.json
+```
+
+常用参数：
+
+```text
+--lane auto|kilo|opencode
+--model <id>
+--prompt <text> | --prompt-file <path>
+--system <text> | --system-file <path>
+--out <path>                 结果 JSON
+--events <path>              原始 ndjson 事件流
+--max-output-tokens <n>      写入插件 defaultMaxTokens
+--max-input-chars <n>
+--timeout-ms <n>
+--permission-mode <name>
+--dsh <path>                 默认 dsh 或 DSH_BIN
+--soft-fail
+--verbose
+```
+
+OpenCode 车道需要 Bun。安装 Bun（`npm i -g bun`），或把 `OUR_FREE_MODEL_BUN`
+指向可执行文件。Kilo 车道不需要 Bun。
+
+退出码：
+
+| 码 | 含义 |
+| --- | --- |
+| `0` | 调用成功，或设置了 `--soft-fail` 且调用失败。 |
+| `1` | 调用失败且未设置 `--soft-fail`。 |
+| `2` | 用法错误或配置错误。 |
 
 ## 安全与限制
 
-- **Prompt 可能被记录。** Kilo 的模型卡明确说明 prompt 可能被上游提供方
-  记录并用于改进其服务。OpenCode 免费车道没有更强的保证。不要发送密钥；
-  未经明确的数据出境决策，不要用于私有内容。
-- **脱敏是尽力而为。** 调用器在发送前会剥离常见 token 拼写、私钥块、
-  bearer 头和带引号的凭据赋值。它是安全网，不是保证。输入由
-  `maxInputChars` 限制。
-- **模型输出永不执行。** 它作为文本返回、写入 summary，或写入已清洗的
-  comment 文件。由调用方决定如何使用。不要把它交给 shell，也不要未经校验
-  就让它选择 label 或合并。comment 上限为 60,000 字符，低于 GitHub 的
-  65,536 限制。
-- **GitHub 托管 IP 可能被拒绝。** 两条车道之所以免费，是因为它们限流并
-  按地区设限。共享 runner IP 正是这些门槛会关注的对象。添加自动触发前先
-  运行 smoke workflow。
-- **不提供 GitHub Models / BYOK 回退。** 本 action 刻意只使用两条免凭据车道。
-  如果两者都失败，`ok` 为 `false`；开启 `soft-fail` 时步骤仍然通过，失败
-  信息写在 job summary 中。
-- **仅支持 Chat-wire 模型。** Responses/Messages-wire 模型会被 roster 发现
-  过滤掉，显式指定时也会被拒绝。
-- **上游不提供 SLA。** 模型清单、配额策略和客户端门槛可能随时变化。
-  vendored 的 `o2a.js` 固定到特定上游版本，正是为了这个原因。
-- **Actions 可接受使用。** 用于仓库相关 CI（review、分类、发布说明）。不要
-  把它暴露为通用模型 API，也不要定时挖掘免费车道。
-
-## 开发
-
-```bash
-npm test
-node scripts/gha-call.mjs --help
-```
-
-离线套件覆盖 flag 解析、请求规范化、脱敏、容量上限、车道顺序、
-text/reasoning/tool-call/empty 流的 SSE 投影、结果写入，以及
-summary/comment 格式化器。无需网络，也不消耗配额。
-
-手动 smoke workflow 位于 `.github/workflows/smoke.yml`。它是唯一消耗配额的
-workflow。先用 `lane=auto` 运行，然后分别运行 `kilo` 和 `opencode`，以便在
-auto 无法回答时定位故障。
-
-release tracker 位于 `.github/workflows/sync-upstream.yml`。GitHub 无法订阅
-另一个仓库的 release 事件，因此它每小时检查上游 release。只跟随稳定的
-`vX.Y.Z` tag，重新 vendor `vendor/ofm/`，运行 `npm test`，并直接提交到
-`main`。它不运行 smoke：同步提交后，手动运行 `smoke` 的 `lane=auto`，必要时
-再分别运行 `kilo` 或 `opencode`。手动运行可指定 tag 和 `dry_run` 开关。
-
-tracker 需要 `contents: write`。如果 `main` 受保护、禁止直接推送，请允许
-GitHub Actions bot 或使用 PAT，否则同步会失败。同步提交就是一次代码变更：
-依赖它之前，请阅读 diff 和 vendor summary。
-
-本地验证（2026-11-23，Windows，Node 24.21，Bun 1.4.5）两条车道都返回
-`PONG`，并通过把 `OUR_FREE_MODEL_KILO_BASE` 指向死端口验证了 auto 回退。
-
-GitHub 托管验证（2026-11-23，`ubuntu-latest`，runner 镜像
-`ubuntu-26.04`）在从 `v2.9.0` release tag 同步的 vendor 上，两条车道都返回
-`PONG`：`lane=auto` 由 Kilo 回答（`kilo-auto/free`，1.6s），
-`lane=opencode` 由 `deepseek-v4.1-flash-free` + Bun 回答（0.9s）。两次运行都
-从 live listing 选择模型（`modelSource: listing`）。release tracker 同日也
-做了验证：`v2.8.9` 的 dry run、一次已是最新的自动运行，以及一次真实的
-commit/push 回到 `v2.9.0`。
+- **运行时会安装上游代码。** action 从 npm 安装 `@deepseek-ai/dsh`，从 GitHub
+  Release 下载并安装插件。需要可复现时请钉死 `dsh-version` 和 `plugin-tag`。
+- **headless 是 agent，不只是聊天接口。** 它带工具。默认
+  `permission-mode: read-only` 且 `approval-policy never`，并在 prompt 里保留
+  "Do not use tools"；这能阻止写操作，但不是把模型关进无工具的沙箱。不要把
+  `danger-full-access` 用在不可信输入上。
+- **Prompt 可能被记录。** Kilo 的模型卡明确说明 prompt 可能被上游记录并用于
+  改进服务。OpenCode 免费车道没有更强的保证。不要发送密钥，也不要在未经数据
+  出境决策的情况下用于私有内容。
+- **脱敏是尽力而为。** 调用器在发送前剥离常见 token 拼写、私钥块、bearer 头
+  和带引号的凭据赋值。它是安全网，不是保证。
+- **模型输出永不执行。** 它作为文本返回、写入 summary，或写入已清洗的 comment
+  文件。不要把它交给 shell，也不要未经校验就让它选择 label 或合并。
+- **GitHub 托管 IP 可能被拒绝。** 两条车道都是限流、按地区设限的免费服务。
+  添加自动触发前先跑 smoke workflow。
+- **上游不提供 SLA。** 模型清单、配额和客户端门槛可能随时变化；这正是直接使用
+  dsh 生态、而不是在本地复制一份协议的原因。
+- **Actions 可接受使用。** 用于仓库相关 CI（review、分类、发布说明）。不要把它
+  暴露为通用模型 API，也不要定时挖掘免费车道。
 
 ## Action 版本
 
-composite action 和两个 workflow 都把每个第三方 action pin 到完整 commit SHA，
-并带尾部版本注释：
+composite action 和 workflow 把第三方 action pin 到完整 commit SHA，并带尾部
+版本注释：
 
 | Action | Pin |
 | --- | --- |
@@ -269,50 +272,38 @@ composite action 和两个 workflow 都把每个第三方 action pin 到完整 c
 | `oven-sh/setup-bun` | `v2.2.0` |
 
 SHA pin 不会被上游 tag 重写移动；注释保持版本可读。这些 release 运行在
-Node 24 action runtime，因此不会产生旧 `v4` pin 的 Node 20 弃用警告。
-自托管 runner 需要 Actions Runner v2.327.1 或更高；GitHub 托管 runner 已
-满足。v7 pin 已于 2026-11-23 用一次 Kilo smoke 和 `v2.8.9` 的
-`sync-upstream` dry run 重新验证。
+Node 24 action runtime。自托管 runner 需要 Actions Runner v2.327.1 或更高。
 
-`.github/dependabot.yml` 每周检查 pin 并开一个合并 PR。它不碰 `vendor/ofm/`：
-那由 `sync-upstream.yml` 单独处理。手动升级时，把 tag 解析为 commit SHA
-（例如 `git ls-remote https://github.com/actions/checkout refs/tags/v7.0.1`），
-更新 SHA 和 `# vX.Y.Z` 注释，然后运行 `actionlint` 和 `npm test`。保留注释：
-Dependabot 依赖它保持 pin 最新。
+`.github/dependabot.yml` 每周检查 pin 并开一个合并 PR。手动升级时，把 tag
+解析为 commit SHA，更新 SHA 和 `# vX.Y.Z` 注释，然后运行 `actionlint` 和
+`npm test`。保留注释：Dependabot 依赖它保持 pin 最新。
 
-## Vendoring
-
-`vendor/ofm/` 是从 `dsh-our-free-model` release tag 复制来的依赖闭包。它自
-包含，因此 action 可以在任何仓库运行，无需第二次 checkout。
-`vendor/ofm/PROVENANCE.json` 记录 `releaseTag`、`version`、`commit`、
-`describe`、`dirty` 和文件列表；`releaseTag` 是 sync workflow 每次比较的键。
+## 开发与验证
 
 ```bash
-# 从 release tag 的干净 checkout 同步。worktree 可让本地 main checkout 保持空闲：
-git -C ../dsh-our-free-model worktree add --detach ../.upstream-v2.9.0 v2.9.0
-node scripts/sync-vendor.mjs --source ../.upstream-v2.9.0 --tag v2.9.0
-
-# 检测漂移，包括过期文件和 PROVENANCE releaseTag 不匹配：
-node scripts/sync-vendor.mjs --check --source ../.upstream-v2.9.0 --tag v2.9.0
-
-# 完成后：
-git -C ../dsh-our-free-model worktree remove ../.upstream-v2.9.0
+npm test
+node scripts/dsh-call.mjs --help
 ```
 
-源必须干净且位于稳定的 `--tag`。脚本会拒绝脏工作树、非 `vX.Y.Z` tag、
-`package.json` 版本与 tag 不一致，以及 HEAD 不是 tag commit 的情况。它还会
-验证闭包内每个相对 import 都解析到另一个 vendored 文件；新的上游依赖会让
-同步失败，而不是在运行时抛 `MODULE_NOT_FOUND`。过期的 `.js` 文件会被删除，
-`--check` 会报告它们。
+离线套件用一个假的 dsh 回放 ndjson 事件流，覆盖车道选择、settings 合并、
+事件解析、失败码、脱敏、结果写入、评论清洗和 CLI 退出码；不联网，也不消耗配额。
 
-tracker 自己排序稳定 tag，而不信任 `/releases/latest`：上游会在某些稳定
-release 后创建 `*-macos-unofficial` release，所以 "latest" 可能指向非官方
-构建。只考虑 `vX.Y.Z` release。
+手动 smoke workflow 位于 `.github/workflows/smoke.yml`，是唯一消耗配额的
+workflow。先用 `lane=auto`，再分别跑 `kilo` 和 `opencode`。它会上传
+`result.json` 和 `events.ndjson`。
 
-不要手工编辑 vendored 文件，尤其是 `o2a.js`；上游网关会逐字节校验其
-prompt/tool 资产。
+2026-11-23 在 GitHub 托管 runner（`ubuntu-latest`）上的验证：
+
+| 车道 | 结果 | 耗时 |
+| --- | --- | --- |
+| `auto`（`combo:gha`） | `PONG` | 3.9s |
+| `kilo`（`kilo-auto/free`） | `PONG` | 6.2s |
+| `opencode`（`deepseek-v4.1-flash-free`） | `PONG` | 3.1s |
+
+使用的版本为 dsh `0.2.2-rc.5`、插件 `v2.9.0`；三个 job 均约 1 分钟（含
+npm 全局安装）。
 
 ## License
 
-MIT。vendored 文件为 MIT，Copyright (c) 2026 Ebony-Vinyl。见 `LICENSE` 和
-`NOTICE`。
+MIT。`dsh-our-free-model` 在运行时从上游 Release 下载，不随本仓库分发；
+其许可证见上游仓库。

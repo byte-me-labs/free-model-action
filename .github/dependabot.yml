@@ -2,8 +2,8 @@ version: 2
 
 # Workflows pin actions to full commit SHAs with a trailing version comment.
 # Dependabot understands that convention, updates both the SHA and the comment,
-# and groups the updates into one weekly PR. This is separate from
-# sync-upstream.yml, which follows the vendored dsh-our-free-model release.
+# and groups the updates into one weekly PR. dsh and dsh-our-free-model are not
+# tracked here: the action resolves their latest versions at run time.
 updates:
   - package-ecosystem: github-actions
     directory: /
