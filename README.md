@@ -250,6 +250,19 @@ The manual smoke workflow lives at `.github/workflows/smoke.yml`. It is the
 only workflow that spends quota. Run it with `lane=auto` first, then `kilo` and
 `opencode` separately to isolate the failure if auto cannot answer.
 
+The release tracker lives at `.github/workflows/sync-upstream.yml`. GitHub
+cannot subscribe to another repository's release event, so it checks the
+upstream releases once a day. It follows only stable `vX.Y.Z` tags, re-vendors
+`vendor/ofm/`, runs `npm test`, and commits the result directly to `main`. It
+does not run smoke: after a sync commit, run `smoke` manually with `lane=auto`,
+then isolate `kilo` or `opencode` if needed. A manual run accepts a specific
+tag and a `dry_run` switch.
+
+The tracker needs `contents: write`. If `main` is protected against direct
+pushes, allow the GitHub Actions bot or use a PAT, otherwise the sync fails.
+A sync commit is a code change: read its diff and the vendor summary before
+relying on it.
+
 Local verification on 2026-11-23 (Windows, Node 24.21, Bun 1.4.5) returned
 `PONG` from both lanes and exercised the auto fallback by pointing
 `OUR_FREE_MODEL_KILO_BASE` at a dead port.
@@ -262,20 +275,36 @@ from the live listing (`modelSource: listing`).
 
 ## Vendoring
 
-`vendor/ofm/` is a dependency closure copied from `dsh-our-free-model` at the
-version recorded in `vendor/ofm/PROVENANCE.json`. It is self-contained so the
-action can run from any repository without a second checkout.
+`vendor/ofm/` is a dependency closure copied from a `dsh-our-free-model`
+release tag. It is self-contained so the action can run from any repository
+without a second checkout. `vendor/ofm/PROVENANCE.json` records `releaseTag`,
+`version`, `commit`, `describe`, `dirty`, and the file list; `releaseTag` is the
+key the sync workflow compares on each run.
 
 ```bash
-node scripts/sync-vendor.mjs          # copy from ../dsh-our-free-model
-node scripts/sync-vendor.mjs --check  # fail on drift
+# Sync from a clean checkout of the release tag. A worktree keeps the local
+# main checkout free:
+git -C ../dsh-our-free-model worktree add --detach ../.upstream-v2.9.0 v2.9.0
+node scripts/sync-vendor.mjs --source ../.upstream-v2.9.0 --tag v2.9.0
+
+# Fail on drift, including a stale file or a PROVENANCE releaseTag mismatch:
+node scripts/sync-vendor.mjs --check --source ../.upstream-v2.9.0 --tag v2.9.0
 ```
 
-The sync script verifies that every relative import in the closure resolves to
-another vendored file. A new upstream dependency fails the sync instead of
-shipping a runtime `MODULE_NOT_FOUND`. Do not hand-edit the vendored files,
-especially `o2a.js`; the upstream gateway checks its prompt/tool assets
-byte-for-byte.
+The source must be clean and at `--tag`. The script refuses a dirty tree, a tag
+whose `package.json` version differs, and a HEAD that is not the tag commit.
+It also verifies that every relative import in the closure resolves to another
+vendored file; a new upstream dependency fails the sync instead of shipping a
+runtime `MODULE_NOT_FOUND`. Stale `.js` files are removed, and `--check`
+reports them.
+
+The tracker sorts the stable tags itself instead of trusting
+`/releases/latest`: upstream creates `*-macos-unofficial` releases after some
+stable releases, so "latest" can point at an unofficial build. Only
+`vX.Y.Z` releases are considered.
+
+Do not hand-edit the vendored files, especially `o2a.js`; the upstream gateway
+checks its prompt/tool assets byte-for-byte.
 
 ## License
 

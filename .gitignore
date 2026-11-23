@@ -1,5 +1,6 @@
 .tools/
 .tmp-*
+.upstream/
 node_modules/
 result*.json
 *.log

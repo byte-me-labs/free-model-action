@@ -8,7 +8,8 @@
  *
  *     node scripts/sync-vendor.mjs
  *     node scripts/sync-vendor.mjs --source ../dsh-our-free-model
- *     node scripts/sync-vendor.mjs --check
+ *     node scripts/sync-vendor.mjs --source ../dsh-our-free-model --tag v2.9.0
+ *     node scripts/sync-vendor.mjs --check --tag v2.9.0
  *
  * It verifies that every relative import in the closure points at another
  * vendored file. A new upstream import fails the sync instead of producing a
@@ -42,12 +43,16 @@ function parseArgs(argv) {
   const args = {
     source: path.resolve(ROOT, '..', 'dsh-our-free-model'),
     check: false,
+    tag: null,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index]
     if (flag === '--source') {
       if (argv[index + 1] === undefined) throw new Error('--source requires a path')
       args.source = path.resolve(argv[++index])
+    } else if (flag === '--tag') {
+      if (argv[index + 1] === undefined) throw new Error('--tag requires a release tag such as v2.9.0')
+      args.tag = argv[++index]
     } else if (flag === '--check') {
       args.check = true
     } else {
@@ -85,21 +90,76 @@ function verifyImports(file, text) {
   }
 }
 
-function sourceMetadata(source) {
+function gitOutput(source, gitArgs) {
+  return execFileSync('git', ['-C', source, ...gitArgs], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim()
+}
+
+/** Never let a tokenized HTTPS remote end up in PROVENANCE.json. */
+function normalizeRemote(url) {
+  const value = String(url ?? '').trim()
+  if (value === '') return 'https://github.com/Ebony-Vinyl/dsh-our-free-model'
+  try {
+    if (/^https?:\/\//i.test(value)) {
+      const parsed = new URL(value)
+      parsed.username = ''
+      parsed.password = ''
+      return parsed.toString().replace(/\.git$/, '')
+    }
+  } catch { /* fall through to the raw value */ }
+  return value.replace(/\.git$/, '')
+}
+
+function sourceMetadata(source, tag) {
   let version = 'unknown'
   try {
     version = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')).version ?? 'unknown'
   } catch { /* the metadata is best effort */ }
   let commit = 'unknown'
-  try {
-    commit = execFileSync('git', ['-C', source, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
-  } catch { /* not a checkout */ }
+  try { commit = gitOutput(source, ['rev-parse', 'HEAD']) } catch { /* not a checkout */ }
+  let describe = 'unknown'
+  try { describe = gitOutput(source, ['describe', '--tags', '--always']) } catch { /* not a checkout */ }
+  let dirty = null
+  try { dirty = gitOutput(source, ['status', '--porcelain']) !== '' } catch { /* not a checkout */ }
   let remote = 'https://github.com/Ebony-Vinyl/dsh-our-free-model'
   try {
-    const url = execFileSync('git', ['-C', source, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim()
-    if (url !== '') remote = url.replace(/\.git$/, '')
+    const url = gitOutput(source, ['remote', 'get-url', 'origin'])
+    if (url !== '') remote = normalizeRemote(url)
   } catch { /* keep the known upstream */ }
-  return { version, commit, remote }
+  let tagCommit = null
+  if (tag !== null) {
+    try { tagCommit = gitOutput(source, ['rev-parse', `${tag}^{commit}`]) } catch { /* shallow checkout */ }
+  }
+  return { version, commit, describe, dirty, remote, tagCommit }
+}
+
+/**
+ * A release sync must be reproducible: the source checkout has to be clean and
+ * at the requested tag. `tagCommit` is absent in a shallow checkout that did
+ * not fetch the tag ref; the package.json check below still pins the release.
+ */
+function verifySource(metadata, tag) {
+  if (metadata.dirty === null) {
+    throw new Error('source is not a git checkout; sync from a clone of dsh-our-free-model')
+  }
+  if (metadata.dirty) {
+    throw new Error('source checkout is dirty; commit or stash changes before syncing')
+  }
+  if (tag === null) return
+  const expectedVersion = tag.replace(/^v/, '')
+  if (/^\d+\.\d+\.\d+$/.test(expectedVersion) && metadata.version !== expectedVersion) {
+    throw new Error(`tag ${tag} does not match package.json version ${metadata.version}`)
+  }
+  if (metadata.tagCommit !== null && metadata.commit !== 'unknown' && metadata.commit !== metadata.tagCommit) {
+    throw new Error(
+      `source HEAD ${metadata.commit.slice(0, 7)} is not the ${tag} commit (${metadata.tagCommit.slice(0, 7)})`,
+    )
+  }
+  if (metadata.tagCommit === null) {
+    console.error('sync-vendor: warning: tag ref not found; relying on package.json version')
+  }
 }
 
 function main(argv = process.argv.slice(2)) {
@@ -107,6 +167,9 @@ function main(argv = process.argv.slice(2)) {
   if (!fs.existsSync(path.join(args.source, 'src'))) {
     throw new Error(`${args.source} does not look like a dsh-our-free-model checkout (missing src/)`)
   }
+
+  const metadata = sourceMetadata(args.source, args.tag)
+  verifySource(metadata, args.tag)
 
   const sources = new Map()
   for (const file of FILES) {
@@ -123,11 +186,23 @@ function main(argv = process.argv.slice(2)) {
       try { current = fs.readFileSync(vendored, 'utf8') } catch { /* missing is drift */ }
       if (current !== text) drifted.push(file)
     }
+    let existingFiles = []
+    try { existingFiles = fs.readdirSync(DEST) } catch { /* missing vendor dir is drift below */ }
+    for (const existing of existingFiles) {
+      if (existing.endsWith('.js') && !sources.has(existing)) drifted.push(`${existing} (stale)`)
+    }
+    if (args.tag !== null) {
+      let releaseTag = null
+      try {
+        releaseTag = JSON.parse(fs.readFileSync(path.join(DEST, 'PROVENANCE.json'), 'utf8')).releaseTag ?? null
+      } catch { /* missing provenance is drift */ }
+      if (releaseTag !== args.tag) drifted.push(`PROVENANCE.json (releaseTag is ${releaseTag ?? 'missing'})`)
+    }
     if (drifted.length > 0) {
       console.error(`vendor drift: ${drifted.join(', ')}`)
       return 1
     }
-    console.log(`vendor is current with ${args.source} (${FILES.length} files)`)
+    console.log(`vendor is current with ${args.source}${args.tag === null ? '' : ` at ${args.tag}`} (${FILES.length} files)`)
     return 0
   }
 
@@ -135,27 +210,38 @@ function main(argv = process.argv.slice(2)) {
   for (const [file, text] of sources) {
     fs.writeFileSync(path.join(DEST, file), text)
   }
+  for (const existing of fs.readdirSync(DEST)) {
+    if (existing.endsWith('.js') && !sources.has(existing)) {
+      fs.rmSync(path.join(DEST, existing))
+      console.log(`removed stale vendored file ${existing}`)
+    }
+  }
 
   const license = path.join(ROOT, 'LICENSE')
   if (!fs.existsSync(license)) {
     fs.copyFileSync(path.join(args.source, 'LICENSE'), license)
   }
 
-  const metadata = sourceMetadata(args.source)
   const provenance = {
     source: metadata.remote,
+    releaseTag: args.tag,
     version: metadata.version,
     commit: metadata.commit,
+    describe: metadata.describe,
+    dirty: metadata.dirty,
     syncedAt: new Date().toISOString(),
     files: FILES,
     notes: [
       'Vendored dependency closure of the OpenCode/Kilo wire layer.',
       'o2a.js is generated upstream; do not hand-edit it.',
-      'Run scripts/sync-vendor.mjs after updating dsh-our-free-model.',
+      'Synced from an upstream release tag; releaseTag is the comparison key for sync-upstream.yml.',
+      'Run scripts/sync-vendor.mjs --tag <tag> after updating dsh-our-free-model.',
     ],
   }
   fs.writeFileSync(path.join(DEST, 'PROVENANCE.json'), `${JSON.stringify(provenance, null, 2)}\n`)
-  console.log(`synced ${FILES.length} files from ${args.source} (${metadata.version} @ ${metadata.commit})`)
+  console.log(
+    `synced ${FILES.length} files from ${args.source} (${args.tag ?? metadata.describe} @ ${metadata.commit.slice(0, 7)}, version ${metadata.version})`,
+  )
   return 0
 }
 

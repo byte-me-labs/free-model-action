@@ -1,0 +1,187 @@
+name: sync-upstream
+
+# GitHub cannot subscribe to another repository's release event. Poll the
+# upstream releases once a day instead, and only follow stable `vX.Y.Z` tags:
+# upstream also publishes `*-macos-unofficial` releases, which must never be
+# vendored into this action.
+#
+# This workflow commits the sync directly to main. It deliberately does not run
+# the smoke workflow: the free lanes are quota-limited and a human runs
+# `.github/workflows/smoke.yml` after reviewing the sync commit.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional upstream tag. Leave empty for the latest stable release.'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Sync and run the offline tests without committing'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Forks must not poll upstream on this schedule, and a dispatch from a
+    # feature branch must not push that branch's tree to main.
+    if: github.repository == 'byte-me-labs/free-model-action' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: Resolve the upstream release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${INPUT_TAG:-}" ]; then
+            tag="$INPUT_TAG"
+          else
+            releases="$RUNNER_TEMP/upstream-releases.json"
+            gh release list \
+              --repo Ebony-Vinyl/dsh-our-free-model \
+              --limit 100 \
+              --json tagName,isDraft,isPrerelease > "$releases"
+            if ! tag=$(RELEASES_FILE="$releases" node --input-type=module -e '
+              import fs from "node:fs"
+              const releases = JSON.parse(fs.readFileSync(process.env.RELEASES_FILE, "utf8"))
+              const tags = releases
+                .filter(release => !release.isDraft && !release.isPrerelease)
+                .map(release => release.tagName)
+                .filter(tag => /^v\d+\.\d+\.\d+$/.test(tag))
+              tags.sort((a, b) => a.localeCompare(b, "en", { numeric: true }))
+              if (tags.length === 0) process.exit(1)
+              process.stdout.write(tags.at(-1))
+            '); then
+              echo "::error::no stable vX.Y.Z release found upstream"
+              exit 1
+            fi
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::upstream tag '$tag' is not a stable vX.Y.Z release"
+            exit 1
+          fi
+
+          current=""
+          if [ -f vendor/ofm/PROVENANCE.json ]; then
+            current=$(node -e '
+              const fs = require("node:fs")
+              const provenance = JSON.parse(fs.readFileSync("vendor/ofm/PROVENANCE.json", "utf8"))
+              process.stdout.write(provenance.releaseTag ?? "")
+            ')
+          fi
+
+          dry_run="${INPUT_DRY_RUN:-false}"
+          changed=true
+          reason="new upstream release"
+
+          if [ -n "$current" ] && [ "$current" = "$tag" ] && [ "$dry_run" != "true" ]; then
+            changed=false
+            reason="already vendored"
+          elif [ -z "${INPUT_TAG:-}" ] && [ -n "$current" ]; then
+            # Automatic runs must never downgrade main. A manual tag may be a
+            # deliberate rollback, so only enforce this for scheduled runs.
+            newest=$(printf '%s\n%s\n' "$current" "$tag" | sort -V | tail -n 1)
+            if [ "$newest" != "$tag" ]; then
+              changed=false
+              reason="latest stable $tag is older than vendored $current"
+            fi
+          fi
+
+          {
+            echo "### Upstream release sync"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Latest stable | \`$tag\` |"
+            echo "| Vendored | \`${current:-none}\` |"
+            echo "| Dry run | \`$dry_run\` |"
+            echo "| Action | $reason |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the upstream release
+        if: steps.release.outputs.changed == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Ebony-Vinyl/dsh-our-free-model
+          ref: ${{ steps.release.outputs.tag }}
+          path: .upstream
+          fetch-depth: 1
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Sync the vendored wire layer
+        if: steps.release.outputs.changed == 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: node scripts/sync-vendor.mjs --source .upstream --tag "$TAG"
+
+      - name: Run the offline tests
+        if: steps.release.outputs.changed == 'true'
+        run: npm test
+
+      - name: Show the vendor diff
+        if: steps.release.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git status --short
+          {
+            echo "### Vendor diff"
+            echo ""
+            echo '```'
+            git diff --stat -- vendor/ofm
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push to main
+        if: steps.release.outputs.changed == 'true' && inputs.dry_run != true
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add vendor/ofm
+          if git diff --cached --quiet; then
+            echo "vendor files are already identical; nothing to commit"
+            exit 0
+          fi
+          git commit \
+            -m "chore: sync vendored wire layer to ${TAG}" \
+            -m "Upstream release: https://github.com/Ebony-Vinyl/dsh-our-free-model/releases/tag/${TAG}" \
+            -m "Co-Authored-By: Claude Code <noreply@anthropic.com>"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Report the dry run
+        if: steps.release.outputs.changed == 'true' && inputs.dry_run == true
+        run: |
+          echo 'Dry run: the vendor changes were tested but not committed.' >> "$GITHUB_STEP_SUMMARY"
