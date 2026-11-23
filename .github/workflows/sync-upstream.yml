@@ -145,6 +145,12 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
         run: node scripts/sync-vendor.mjs --source .upstream --tag "$TAG"
 
+      - name: Verify the vendored snapshot
+        if: steps.release.outputs.changed == 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: node scripts/sync-vendor.mjs --check --source .upstream --tag "$TAG"
+
       - name: Run the offline tests
         if: steps.release.outputs.changed == 'true'
         run: npm test
