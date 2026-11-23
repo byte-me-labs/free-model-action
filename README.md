@@ -252,7 +252,7 @@ only workflow that spends quota. Run it with `lane=auto` first, then `kilo` and
 
 The release tracker lives at `.github/workflows/sync-upstream.yml`. GitHub
 cannot subscribe to another repository's release event, so it checks the
-upstream releases once a day. It follows only stable `vX.Y.Z` tags, re-vendors
+upstream releases hourly. It follows only stable `vX.Y.Z` tags, re-vendors
 `vendor/ofm/`, runs `npm test`, and commits the result directly to `main`. It
 does not run smoke: after a sync commit, run `smoke` manually with `lane=auto`,
 then isolate `kilo` or `opencode` if needed. A manual run accepts a specific

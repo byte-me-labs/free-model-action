@@ -1,7 +1,7 @@
 name: sync-upstream
 
 # GitHub cannot subscribe to another repository's release event. Poll the
-# upstream releases once a day instead, and only follow stable `vX.Y.Z` tags:
+# upstream releases hourly instead, and only follow stable `vX.Y.Z` tags:
 # upstream also publishes `*-macos-unofficial` releases, which must never be
 # vendored into this action.
 #
@@ -10,7 +10,7 @@ name: sync-upstream
 # `.github/workflows/smoke.yml` after reviewing the sync commit.
 on:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       tag:
