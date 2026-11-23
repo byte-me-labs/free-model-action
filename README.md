@@ -296,12 +296,12 @@ node scripts/sync-vendor.mjs --check --source ../.upstream-v2.9.0 --tag v2.9.0
 git -C ../dsh-our-free-model worktree remove ../.upstream-v2.9.0
 ```
 
-The source must be clean and at `--tag`. The script refuses a dirty tree, a tag
-whose `package.json` version differs, and a HEAD that is not the tag commit.
-It also verifies that every relative import in the closure resolves to another
-vendored file; a new upstream dependency fails the sync instead of shipping a
-runtime `MODULE_NOT_FOUND`. Stale `.js` files are removed, and `--check`
-reports them.
+The source must be clean and at a stable `--tag`. The script refuses a dirty
+tree, a non-`vX.Y.Z` tag, a tag whose `package.json` version differs, and a
+HEAD that is not the tag commit. It also verifies that every relative import
+in the closure resolves to another vendored file; a new upstream dependency
+fails the sync instead of shipping a runtime `MODULE_NOT_FOUND`. Stale `.js`
+files are removed, and `--check` reports them.
 
 The tracker sorts the stable tags itself instead of trusting
 `/releases/latest`: upstream creates `*-macos-unofficial` releases after some
