@@ -141,6 +141,9 @@ function sourceMetadata(source, tag) {
  * not fetch the tag ref; the package.json check below still pins the release.
  */
 function verifySource(metadata, tag) {
+  if (tag !== null && !/^v\d+\.\d+\.\d+$/.test(tag)) {
+    throw new Error(`--tag ${tag} is not a stable release tag (expected vX.Y.Z)`)
+  }
   if (metadata.dirty === null) {
     throw new Error('source is not a git checkout; sync from a clone of dsh-our-free-model')
   }
