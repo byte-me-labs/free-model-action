@@ -268,10 +268,12 @@ Local verification on 2026-11-23 (Windows, Node 24.21, Bun 1.4.5) returned
 `OUR_FREE_MODEL_KILO_BASE` at a dead port.
 
 GitHub-hosted verification on 2026-11-23 (`ubuntu-latest`, runner image
-`ubuntu-26.04`) also returned `PONG` from both lanes: `lane=auto` answered on
-Kilo (`kilo-auto/free`, 1.3s) and `lane=opencode` answered on
-`deepseek-v4.1-flash-free` with Bun 1.4.5 (1.8s). Both runs selected their model
-from the live listing (`modelSource: listing`).
+`ubuntu-26.04`) returned `PONG` from both lanes on the vendor synced from the
+`v2.9.0` release tag: `lane=auto` answered on Kilo (`kilo-auto/free`, 1.6s) and
+`lane=opencode` answered on `deepseek-v4.1-flash-free` with Bun (0.9s). Both
+runs selected their model from the live listing (`modelSource: listing`). The
+release tracker was exercised on the same day: a dry run at `v2.8.9`, an
+up-to-date automatic run, and a real commit/push back to `v2.9.0`.
 
 ## Vendoring
 
