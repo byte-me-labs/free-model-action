@@ -1,5 +1,5 @@
 name: 'Free Model Call'
-description: 'Call the OpenCode and Kilo free model lanes and return the answer as a JSON result'
+description: 'Call the free model lanes through the official dsh headless profile and return the answer as a JSON result'
 author: 'free-model-action'
 branding:
   icon: 'cpu'
@@ -7,11 +7,11 @@ branding:
 
 inputs:
   lane:
-    description: 'auto, kilo, or opencode. auto tries Kilo first, then OpenCode.'
+    description: 'auto, kilo, or opencode. auto uses the plugin combo: Kilo first, then OpenCode.'
     required: false
     default: 'auto'
   model:
-    description: 'Model id. Requires lane=kilo or lane=opencode; auto picks one default per lane.'
+    description: 'Explicit model id or combo id. Overrides lane.'
     required: false
     default: ''
   prompt:
@@ -23,31 +23,43 @@ inputs:
     required: false
     default: ''
   system:
-    description: 'Optional system instruction.'
+    description: 'Optional instruction prepended to the task.'
     required: false
     default: ''
   system-file:
-    description: 'Path to a UTF-8 system instruction file. Takes precedence over system.'
+    description: 'Path to a UTF-8 instruction file. Takes precedence over system.'
     required: false
     default: ''
   max-output-tokens:
-    description: 'Output token cap.'
+    description: 'Output token cap written to the plugin defaultMaxTokens setting.'
     required: false
     default: '1200'
-  timeout-ms:
-    description: 'Per-lane timeout in milliseconds.'
-    required: false
-    default: '180000'
   max-input-chars:
     description: 'Prompt character cap applied after secret redaction.'
     required: false
     default: '60000'
+  timeout-ms:
+    description: 'Whole-run timeout in milliseconds.'
+    required: false
+    default: '180000'
+  permission-mode:
+    description: 'dsh permission preset: read-only, workspace-write, or danger-full-access.'
+    required: false
+    default: 'read-only'
   soft-fail:
-    description: 'Exit 0 when every lane fails. Default true so an AI step does not break CI.'
+    description: 'Exit 0 when the run fails. Default true so an AI step does not break CI.'
     required: false
     default: 'true'
+  dsh-version:
+    description: 'npm version or dist-tag of @deepseek-ai/dsh. Default latest.'
+    required: false
+    default: 'latest'
+  plugin-tag:
+    description: 'dsh-our-free-model release tag, or latest for the newest stable release.'
+    required: false
+    default: 'latest'
   setup-node:
-    description: 'Install Node 22 with actions/setup-node.'
+    description: 'Install Node 24 with actions/setup-node. dsh requires Node 24.9 or later.'
     required: false
     default: 'true'
   install-bun:
@@ -57,19 +69,19 @@ inputs:
 
 outputs:
   ok:
-    description: 'true when a lane returned non-empty text.'
+    description: 'true when dsh completed with non-empty answer text.'
     value: ${{ steps.call.outputs.ok }}
   lane:
-    description: 'Lane that answered: kilo or opencode.'
+    description: 'Lane that was requested: auto, kilo, or opencode.'
     value: ${{ steps.call.outputs.lane }}
   model:
-    description: 'Model that answered.'
+    description: 'Model or combo id handed to the plugin.'
     value: ${{ steps.call.outputs.model }}
   text:
     description: 'Answer text.'
     value: ${{ steps.call.outputs.text }}
   finish:
-    description: 'Upstream finish reason.'
+    description: 'dsh terminal reason kind: completed, error, or aborted.'
     value: ${{ steps.call.outputs.finish }}
   result-file:
     description: 'Absolute path to the result JSON.'
@@ -77,6 +89,9 @@ outputs:
   comment-file:
     description: 'Absolute path to a sanitized comment body when ok=true; empty otherwise.'
     value: ${{ steps.emit.outputs.comment-file }}
+  plugin-tag:
+    description: 'Resolved dsh-our-free-model release tag.'
+    value: ${{ steps.plugin.outputs.tag }}
 
 runs:
   using: composite
@@ -85,13 +100,67 @@ runs:
       if: ${{ inputs.setup-node == 'true' }}
       uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
-        node-version: '22'
+        node-version: '24'
 
     - id: bun
       if: ${{ inputs.install-bun == 'true' }}
       uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       with:
         bun-version: 'latest'
+
+    - name: Install dsh
+      shell: bash
+      env:
+        DSH_VERSION: ${{ inputs.dsh-version }}
+      run: |
+        set -euo pipefail
+        if [[ ! "$DSH_VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+          echo "::error::dsh-version '$DSH_VERSION' is not a valid npm version or dist-tag"
+          exit 1
+        fi
+        stamp="${RUNNER_TEMP:-/tmp}/free-model-action-dsh-${DSH_VERSION}"
+        if [ -f "$stamp" ] && command -v dsh >/dev/null 2>&1; then
+          echo "dsh is already installed in this job ($DSH_VERSION)"
+          exit 0
+        fi
+        npm install --global --no-audit --no-fund \
+          "@deepseek-ai/dsh@${DSH_VERSION}" pnpm@latest
+        touch "$stamp"
+        dsh --version
+
+    - name: Install the dsh-our-free-model plugin
+      id: plugin
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        INPUT_TAG: ${{ inputs.plugin-tag }}
+        DSH_HOME: ${{ runner.temp }}/free-model-action/dsh
+      run: |
+        set -euo pipefail
+        tag="$INPUT_TAG"
+        if [ "$tag" = "latest" ]; then
+          tag=$(node "$GITHUB_ACTION_PATH/scripts/resolve-release.mjs" --repo Ebony-Vinyl/dsh-our-free-model)
+        fi
+        if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::plugin-tag '$tag' is not a stable vX.Y.Z release"
+          exit 1
+        fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+        mkdir -p "$DSH_HOME"
+        plugin_dir="$RUNNER_TEMP/free-model-action-plugin"
+        rm -rf "$plugin_dir"
+        mkdir -p "$plugin_dir"
+        gh release download "$tag" \
+          --repo Ebony-Vinyl/dsh-our-free-model \
+          --pattern 'dsh-our-free-model-*.tgz' \
+          --dir "$plugin_dir"
+        tarball=$(find "$plugin_dir" -maxdepth 1 -name '*.tgz' -print -quit)
+        if [ -z "$tarball" ]; then
+          echo "::error::release $tag does not contain a .tgz asset"
+          exit 1
+        fi
+        dsh plugin --profile headless add "$tarball"
 
     - id: call
       shell: bash
@@ -103,27 +172,35 @@ runs:
         INPUT_SYSTEM: ${{ inputs.system }}
         INPUT_SYSTEM_FILE: ${{ inputs.system-file }}
         INPUT_MAX_OUTPUT_TOKENS: ${{ inputs.max-output-tokens }}
-        INPUT_TIMEOUT_MS: ${{ inputs.timeout-ms }}
         INPUT_MAX_INPUT_CHARS: ${{ inputs.max-input-chars }}
+        INPUT_TIMEOUT_MS: ${{ inputs.timeout-ms }}
+        INPUT_PERMISSION_MODE: ${{ inputs.permission-mode }}
         INPUT_SOFT_FAIL: ${{ inputs.soft-fail }}
+        INPUT_INSTALL_BUN: ${{ inputs.install-bun }}
         DSH_HOME: ${{ runner.temp }}/free-model-action/dsh
       run: |
         set -uo pipefail
         umask 077
         out_dir="${RUNNER_TEMP:-/tmp}/free-model-action"
-        DSH_HOME="${DSH_HOME:-$out_dir/dsh}"
-        export DSH_HOME
-        mkdir -p "$out_dir" "$DSH_HOME"
+        mkdir -p "$out_dir"
         cleanup() { rm -f "$out_dir/prompt.txt" "$out_dir/system.txt"; }
         trap cleanup EXIT
 
+        if [ "$INPUT_INSTALL_BUN" = "true" ]; then
+          bun_path=$(command -v bun || true)
+          if [ -n "$bun_path" ]; then
+            export OUR_FREE_MODEL_BUN="$bun_path"
+          fi
+        fi
+
         args=(
-          --live
-          --out "$out_dir/result.json"
           --lane "$INPUT_LANE"
+          --out "$out_dir/result.json"
+          --events "$out_dir/events.ndjson"
           --max-output-tokens "$INPUT_MAX_OUTPUT_TOKENS"
-          --timeout-ms "$INPUT_TIMEOUT_MS"
           --max-input-chars "$INPUT_MAX_INPUT_CHARS"
+          --timeout-ms "$INPUT_TIMEOUT_MS"
+          --permission-mode "$INPUT_PERMISSION_MODE"
         )
 
         if [ -n "$INPUT_MODEL" ]; then
@@ -146,19 +223,17 @@ runs:
 
         if [ "$INPUT_SOFT_FAIL" = "true" ]; then
           args+=(--soft-fail)
-        else
-          args+=(--strict)
         fi
 
         set +e
-        node "$GITHUB_ACTION_PATH/scripts/gha-call.mjs" "${args[@]}"
+        node "$GITHUB_ACTION_PATH/scripts/dsh-call.mjs" "${args[@]}"
         code=$?
         set -e
 
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
 
         # Emit outputs and the job summary even when the call failed, so the
-        # caller can inspect `ok` and the attempt table instead of a bare red X.
+        # caller can inspect `ok` and the dsh reason instead of a bare red X.
         node "$GITHUB_ACTION_PATH/scripts/emit-result.mjs" \
           --result "$out_dir/result.json" \
           --summary \
@@ -176,7 +251,7 @@ runs:
           echo "comment-file=" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Propagate the lane exit code
+    - name: Propagate the dsh exit code
       shell: bash
       env:
         CALL_EXIT_CODE: ${{ steps.call.outputs.exit-code }}

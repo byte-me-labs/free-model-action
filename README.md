@@ -1,35 +1,32 @@
 # free-model-action
 
-A small GitHub Action and CLI that calls the two credential-free model lanes
-exposed by [`dsh-our-free-model`](https://github.com/Ebony-Vinyl/dsh-our-free-model):
+一个小型 GitHub Action 和 CLI，用于调用
+[`dsh-our-free-model`](https://github.com/Ebony-Vinyl/dsh-our-free-model) 暴露的两条免凭据模型车道：
 
-1. **Kilo free pool** — `kilo-auto/free`, no key, no Bun.
-2. **OpenCode free lane** — `deepseek-v4.1-flash-free` by default, no key,
-   requires Bun for the inference POST.
+1. **Kilo 免费池** — `kilo-auto/free`，无需密钥，无需 Bun。
+2. **OpenCode 免费车道** — 默认 `deepseek-v4.1-flash-free`，无需密钥，
+   推理 POST 需要 Bun。
 
-It is a one-shot caller, not the DSH plugin and not the standalone gateway. One
-prompt in, one JSON result out. No runtime dependencies, no build step, no
-account, and no secret.
+它是一次性调用器，不是 DSH 插件，也不是独立网关。输入一个 prompt，输出一个
+JSON 结果。无运行时依赖、无构建步骤、无账号、无密钥。
 
-The action is designed for repository-local CI work: PR review, issue triage,
-release notes, changelog summaries. It is **not** a general model API — GitHub
-Actions has no inbound HTTP and the upstream free lanes are not a production
-inference service.
+该 action 面向仓库内的 CI 工作：PR review、issue 分类、发布说明、changelog
+摘要。它**不是**通用模型 API —— GitHub Actions 没有入站 HTTP，上游免费车道
+也不是生产推理服务。
 
-## Lane order
+## 车道顺序
 
-`lane: auto` tries Kilo first and OpenCode second.
+`lane: auto` 先试 Kilo，再试 OpenCode。
 
-| Order | Lane | Default model | Notes |
+| 顺序 | 车道 | 默认模型 | 说明 |
 | --- | --- | --- | --- |
-| 1 | Kilo | `kilo-auto/free` | No fingerprint, no Bun. The most likely lane to survive a shared GitHub-hosted runner IP. |
-| 2 | OpenCode | `deepseek-v4.1-flash-free` | Better roster, stricter per-IP/per-session gate. Needs Bun. |
+| 1 | Kilo | `kilo-auto/free` | 无指纹、无需 Bun。在共享 GitHub 托管 runner IP 上最可能存活的车道。 |
+| 2 | OpenCode | `deepseek-v4.1-flash-free` | 模型清单更好，但按 IP/会话的门槛更严。需要 Bun。 |
 
-A 429, 403, region refusal, transport failure, timeout, server error, or empty
-answer moves to the next lane **once**. Nothing is retried on the same lane: a
-quota refusal is a window, not a transient blip.
+429、403、地区拒绝、传输失败、超时、服务端错误或空回答，都会切到下一条车道
+**一次**。同一车道不重试：配额拒绝是一个窗口，不是瞬时抖动。
 
-## Quick start
+## 快速开始
 
 ```yaml
 name: ai-summary
@@ -55,16 +52,15 @@ jobs:
       - run: echo "${{ steps.ai.outputs.text }}"
 ```
 
-If this directory is the repository root, use `uses: ./`. If it is a
-subdirectory of a larger repository, use `uses: ./free-model-action`.
+如果本目录就是仓库根目录，使用 `uses: ./`；如果它是大仓库的子目录，使用
+`uses: ./free-model-action`。
 
-The action installs Node 22 and Bun by default. Set `setup-node: 'false'` or
-`install-bun: 'false'` when the caller already provides them.
+action 默认安装 Node 22 和 Bun。调用方已提供时，设置
+`setup-node: 'false'` 或 `install-bun: 'false'`。
 
-### PR review shape
+### PR review 形态
 
-The diff is data, not instructions. Cap it, delimit it, and tell the model to
-ignore commands inside it:
+diff 是数据，不是指令。限制长度、加分隔符，并告诉模型忽略其中的命令：
 
 ```yaml
 steps:
@@ -101,16 +97,14 @@ steps:
     run: gh pr comment "$PR" --body-file "$COMMENT_FILE"
 ```
 
-`soft-fail` defaults to `true`, so a lane outage does not break CI. Check
-`outputs.ok` before posting. The generated `comment-file` already has control
-characters stripped and `@` mentions neutralized.
+`soft-fail` 默认 `true`，因此车道故障不会让 CI 失败。发布前检查
+`outputs.ok`。生成的 `comment-file` 已去除控制字符并中和 `@` 提及。
 
 ## CLI
 
-The same caller is usable locally. It needs Node 22.19+ or 24+ (the action
-installs Node 22) and refuses to spend lane quota unless `--live` is present.
-When both `--prompt` and `--prompt-file` are given, the file wins; the same is
-true for `--system` and `--system-file`.
+同一个调用器可在本地使用。需要 Node 22.19+ 或 24+（action 安装 Node 22），
+并且只有在带 `--live` 时才会消耗车道配额。同时给出 `--prompt` 和
+`--prompt-file` 时，文件优先；`--system` 和 `--system-file` 同理。
 
 ```bash
 # Kilo
@@ -118,29 +112,28 @@ node scripts/gha-call.mjs --live --lane kilo \
   --prompt 'Do not use tools. Reply with exactly: PONG' \
   --max-output-tokens 64 --out result.json
 
-# OpenCode (needs Bun)
+# OpenCode（需要 Bun）
 node scripts/gha-call.mjs --live --lane opencode \
   --prompt-file prompt.txt --out result.json
 
-# Auto with a soft failure
+# 自动 + 软失败
 node scripts/gha-call.mjs --live --lane auto --prompt-file prompt.txt --soft-fail
 ```
 
-OpenCode needs Bun. Install it with `npm i -g bun`, or point
-`OUR_FREE_MODEL_BUN` at the executable. The action's smoke workflow installs it
-with `oven-sh/setup-bun`.
+OpenCode 需要 Bun。用 `npm i -g bun` 安装，或把 `OUR_FREE_MODEL_BUN` 指向
+可执行文件。action 的 smoke workflow 通过 `oven-sh/setup-bun` 安装。
 
-Exit codes:
+退出码：
 
-| Code | Meaning |
+| 码 | 含义 |
 | --- | --- |
-| `0` | A lane answered, or `--soft-fail` and every lane failed. |
-| `1` | Every lane failed and `--soft-fail` was not set. |
-| `2` | Usage/configuration error, missing `--live`, or an unsupported environment. |
+| `0` | 某条车道给出回答，或设置了 `--soft-fail` 且所有车道都失败。 |
+| `1` | 所有车道都失败且未设置 `--soft-fail`。 |
+| `2` | 用法/配置错误、缺少 `--live`，或不支持的环境。 |
 
-### Request JSON
+### 请求 JSON
 
-`--request request.json` accepts:
+`--request request.json` 接受：
 
 ```json
 {
@@ -157,11 +150,11 @@ Exit codes:
 }
 ```
 
-CLI flags override the file. `--model` requires `--lane kilo` or
-`--lane opencode`; `auto` picks one default per lane. Only chat-wire models are
-supported because the caller builds one Chat body shape.
+CLI 标志覆盖文件。`--model` 需要 `--lane kilo` 或 `--lane opencode`；`auto`
+会为每条车道各选一个默认模型。只支持 chat-wire 模型，因为调用器只构造一种
+Chat 请求体。
 
-### Result JSON
+### 结果 JSON
 
 ```json
 {
@@ -184,101 +177,89 @@ supported because the caller builds one Chat body shape.
 }
 ```
 
-On failure, `ok` is `false`, `code` is the last lane's classification, and
-`attempts` carries every lane that was tried. The result is written even for
-usage errors, so a workflow can always inspect it.
+失败时 `ok` 为 `false`，`code` 是最后一条车道的分类，`attempts` 包含所有
+尝试过的车道。即使使用错误也会写出结果，因此 workflow 总能检查它。
 
-## Failure codes
+## 失败码
 
-| Code | Meaning | Next step |
+| 码 | 含义 | 下一步 |
 | --- | --- | --- |
-| `RATE_LIMIT` | 429 quota window on this egress/session. | Try the next lane; do not retry immediately. |
-| `LANE_LOCKED` | 403 `FreeTierError`; the gateway refused this client. | Try the next lane; check the vendored `o2a.js` if it persists. |
-| `REGION_BLOCKED` | The lane refuses this egress region. | Try the next lane; a runner IP change may help. |
-| `TRANSPORT` | Network, proxy, or missing Bun. | Fix the environment, then try the next lane. |
-| `TIMEOUT` | The per-lane budget expired. | Raise `timeout-ms` or reduce the prompt. |
-| `SERVER` | Upstream 5xx. | Try the next lane later. |
-| `CLIENT_ERROR` | Request/model defect. | Fix the model id or the body. |
-| `EMPTY_RESPONSE` | Reasoning or a tool call with no answer text. | Add "do not use tools" and give the model more output budget. |
-| `USAGE_ERROR` | Bad flags, missing prompt, unsupported Node. | Fix the invocation. |
-| `LIVE_REQUIRED` | `--live` was not passed. | Pass `--live`. |
+| `RATE_LIMIT` | 该出口/会话遇到 429 配额窗口。 | 换下一条车道；不要立即重试。 |
+| `LANE_LOCKED` | 403 `FreeTierError`；网关拒绝了这个客户端。 | 换下一条车道；若持续出现，检查 vendored 的 `o2a.js`。 |
+| `REGION_BLOCKED` | 车道拒绝该出口地区。 | 换下一条车道；更换 runner IP 可能有用。 |
+| `TRANSPORT` | 网络、代理或缺少 Bun。 | 修复环境，然后换下一条车道。 |
+| `TIMEOUT` | 单条车道的预算耗尽。 | 调高 `timeout-ms` 或缩短 prompt。 |
+| `SERVER` | 上游 5xx。 | 稍后换下一条车道。 |
+| `CLIENT_ERROR` | 请求/模型缺陷。 | 修正模型 id 或请求体。 |
+| `EMPTY_RESPONSE` | 只有 reasoning 或工具调用，没有回答文本。 | 加上 "do not use tools"，并给模型更多输出预算。 |
+| `USAGE_ERROR` | 标志错误、缺少 prompt、不支持的 Node。 | 修正调用方式。 |
+| `LIVE_REQUIRED` | 未传 `--live`。 | 传入 `--live`。 |
 
-## Security and limits
+## 安全与限制
 
-- **Prompts may be logged.** Kilo's model card explicitly says prompts may be
-  logged by the upstream provider and used to improve its services. The
-  OpenCode free lane offers no stronger guarantee. Do not send secrets, and do
-  not use this on private content without an explicit data-egress decision.
-- **Redaction is best effort.** The caller strips common token spellings,
-  private-key blocks, bearer headers, and quoted credential assignments before
-  sending. It is a safety net, not a guarantee. The input is capped by
-  `maxInputChars`.
-- **Model output is never executed.** It is returned as text, written to a
-  summary, or written to a sanitized comment file. The caller decides what to
-  do with it. Do not feed it to a shell or let it choose labels/merges without
-  validation. Comments are capped at 60,000 characters, below GitHub's 65,536
-  limit.
-- **GitHub-hosted IPs may be refused.** Both lanes are free because they are
-  rate-limited and region-gated. A shared runner IP is exactly the kind of
-  egress those gates watch. Run the smoke workflow before adding automatic
-  triggers.
-- **No GitHub Models / BYOK fallback.** This action deliberately uses only the
-  two credential-free lanes. If both fail, `ok` is `false`; with `soft-fail`
-  the step still passes and the failure is in the job summary.
-- **Chat-wire models only.** Responses/Messages-wire models are filtered out of
-  roster discovery and rejected when named explicitly.
-- **Upstream is not an SLA.** The model roster, quota policy, and client gate
-  can change without notice. The vendored `o2a.js` is pinned to a specific
-  upstream version for that reason.
-- **Actions acceptable use.** Use it for repository-related CI (review,
-  triage, release notes). Do not expose it as a general model API or mine the
-  free lanes on a schedule.
+- **Prompt 可能被记录。** Kilo 的模型卡明确说明 prompt 可能被上游提供方
+  记录并用于改进其服务。OpenCode 免费车道没有更强的保证。不要发送密钥；
+  未经明确的数据出境决策，不要用于私有内容。
+- **脱敏是尽力而为。** 调用器在发送前会剥离常见 token 拼写、私钥块、
+  bearer 头和带引号的凭据赋值。它是安全网，不是保证。输入由
+  `maxInputChars` 限制。
+- **模型输出永不执行。** 它作为文本返回、写入 summary，或写入已清洗的
+  comment 文件。由调用方决定如何使用。不要把它交给 shell，也不要未经校验
+  就让它选择 label 或合并。comment 上限为 60,000 字符，低于 GitHub 的
+  65,536 限制。
+- **GitHub 托管 IP 可能被拒绝。** 两条车道之所以免费，是因为它们限流并
+  按地区设限。共享 runner IP 正是这些门槛会关注的对象。添加自动触发前先
+  运行 smoke workflow。
+- **不提供 GitHub Models / BYOK 回退。** 本 action 刻意只使用两条免凭据车道。
+  如果两者都失败，`ok` 为 `false`；开启 `soft-fail` 时步骤仍然通过，失败
+  信息写在 job summary 中。
+- **仅支持 Chat-wire 模型。** Responses/Messages-wire 模型会被 roster 发现
+  过滤掉，显式指定时也会被拒绝。
+- **上游不提供 SLA。** 模型清单、配额策略和客户端门槛可能随时变化。
+  vendored 的 `o2a.js` 固定到特定上游版本，正是为了这个原因。
+- **Actions 可接受使用。** 用于仓库相关 CI（review、分类、发布说明）。不要
+  把它暴露为通用模型 API，也不要定时挖掘免费车道。
 
-## Development
+## 开发
 
 ```bash
 npm test
 node scripts/gha-call.mjs --help
 ```
 
-The offline suite covers flag parsing, request normalization, redaction,
-capacity caps, lane order, SSE projection for text/reasoning/tool-call/empty
-streams, result writing, and the summary/comment formatters. It needs no
-network and spends no quota.
+离线套件覆盖 flag 解析、请求规范化、脱敏、容量上限、车道顺序、
+text/reasoning/tool-call/empty 流的 SSE 投影、结果写入，以及
+summary/comment 格式化器。无需网络，也不消耗配额。
 
-The manual smoke workflow lives at `.github/workflows/smoke.yml`. It is the
-only workflow that spends quota. Run it with `lane=auto` first, then `kilo` and
-`opencode` separately to isolate the failure if auto cannot answer.
+手动 smoke workflow 位于 `.github/workflows/smoke.yml`。它是唯一消耗配额的
+workflow。先用 `lane=auto` 运行，然后分别运行 `kilo` 和 `opencode`，以便在
+auto 无法回答时定位故障。
 
-The release tracker lives at `.github/workflows/sync-upstream.yml`. GitHub
-cannot subscribe to another repository's release event, so it checks the
-upstream releases hourly. It follows only stable `vX.Y.Z` tags, re-vendors
-`vendor/ofm/`, runs `npm test`, and commits the result directly to `main`. It
-does not run smoke: after a sync commit, run `smoke` manually with `lane=auto`,
-then isolate `kilo` or `opencode` if needed. A manual run accepts a specific
-tag and a `dry_run` switch.
+release tracker 位于 `.github/workflows/sync-upstream.yml`。GitHub 无法订阅
+另一个仓库的 release 事件，因此它每小时检查上游 release。只跟随稳定的
+`vX.Y.Z` tag，重新 vendor `vendor/ofm/`，运行 `npm test`，并直接提交到
+`main`。它不运行 smoke：同步提交后，手动运行 `smoke` 的 `lane=auto`，必要时
+再分别运行 `kilo` 或 `opencode`。手动运行可指定 tag 和 `dry_run` 开关。
 
-The tracker needs `contents: write`. If `main` is protected against direct
-pushes, allow the GitHub Actions bot or use a PAT, otherwise the sync fails.
-A sync commit is a code change: read its diff and the vendor summary before
-relying on it.
+tracker 需要 `contents: write`。如果 `main` 受保护、禁止直接推送，请允许
+GitHub Actions bot 或使用 PAT，否则同步会失败。同步提交就是一次代码变更：
+依赖它之前，请阅读 diff 和 vendor summary。
 
-Local verification on 2026-11-23 (Windows, Node 24.21, Bun 1.4.5) returned
-`PONG` from both lanes and exercised the auto fallback by pointing
-`OUR_FREE_MODEL_KILO_BASE` at a dead port.
+本地验证（2026-11-23，Windows，Node 24.21，Bun 1.4.5）两条车道都返回
+`PONG`，并通过把 `OUR_FREE_MODEL_KILO_BASE` 指向死端口验证了 auto 回退。
 
-GitHub-hosted verification on 2026-11-23 (`ubuntu-latest`, runner image
-`ubuntu-26.04`) returned `PONG` from both lanes on the vendor synced from the
-`v2.9.0` release tag: `lane=auto` answered on Kilo (`kilo-auto/free`, 1.6s) and
-`lane=opencode` answered on `deepseek-v4.1-flash-free` with Bun (0.9s). Both
-runs selected their model from the live listing (`modelSource: listing`). The
-release tracker was exercised on the same day: a dry run at `v2.8.9`, an
-up-to-date automatic run, and a real commit/push back to `v2.9.0`.
+GitHub 托管验证（2026-11-23，`ubuntu-latest`，runner 镜像
+`ubuntu-26.04`）在从 `v2.9.0` release tag 同步的 vendor 上，两条车道都返回
+`PONG`：`lane=auto` 由 Kilo 回答（`kilo-auto/free`，1.6s），
+`lane=opencode` 由 `deepseek-v4.1-flash-free` + Bun 回答（0.9s）。两次运行都
+从 live listing 选择模型（`modelSource: listing`）。release tracker 同日也
+做了验证：`v2.8.9` 的 dry run、一次已是最新的自动运行，以及一次真实的
+commit/push 回到 `v2.9.0`。
 
-## Action versions
+## Action 版本
 
-The composite action and both workflows pin every third-party action to a full
-commit SHA, with a trailing version comment:
+composite action 和两个 workflow 都把每个第三方 action pin 到完整 commit SHA，
+并带尾部版本注释：
 
 | Action | Pin |
 | --- | --- |
@@ -287,57 +268,51 @@ commit SHA, with a trailing version comment:
 | `actions/upload-artifact` | `v7.0.2` |
 | `oven-sh/setup-bun` | `v2.2.0` |
 
-A SHA pin cannot be moved by an upstream tag rewrite; the comment keeps the
-version readable. These releases run on the Node 24 action runtime, so they do
-not produce the Node 20 deprecation warning that the old `v4` pins did.
-Self-hosted runners need Actions Runner v2.327.1 or later; GitHub-hosted
-runners already have it. The v7 pins were re-verified on 2026-11-23 with a
-Kilo smoke and a `sync-upstream` dry run at `v2.8.9`.
+SHA pin 不会被上游 tag 重写移动；注释保持版本可读。这些 release 运行在
+Node 24 action runtime，因此不会产生旧 `v4` pin 的 Node 20 弃用警告。
+自托管 runner 需要 Actions Runner v2.327.1 或更高；GitHub 托管 runner 已
+满足。v7 pin 已于 2026-11-23 用一次 Kilo smoke 和 `v2.8.9` 的
+`sync-upstream` dry run 重新验证。
 
-`.github/dependabot.yml` checks the pins weekly and opens one grouped PR. It
-does not touch `vendor/ofm/`: that is handled separately by
-`sync-upstream.yml`. To upgrade manually, resolve the tag to its commit SHA
-(for example `git ls-remote https://github.com/actions/checkout refs/tags/v7.0.1`),
-update the SHA and the `# vX.Y.Z` comment, then run `actionlint` and `npm test`.
-Keep the comment: Dependabot uses it to keep the pin current.
+`.github/dependabot.yml` 每周检查 pin 并开一个合并 PR。它不碰 `vendor/ofm/`：
+那由 `sync-upstream.yml` 单独处理。手动升级时，把 tag 解析为 commit SHA
+（例如 `git ls-remote https://github.com/actions/checkout refs/tags/v7.0.1`），
+更新 SHA 和 `# vX.Y.Z` 注释，然后运行 `actionlint` 和 `npm test`。保留注释：
+Dependabot 依赖它保持 pin 最新。
 
 ## Vendoring
 
-`vendor/ofm/` is a dependency closure copied from a `dsh-our-free-model`
-release tag. It is self-contained so the action can run from any repository
-without a second checkout. `vendor/ofm/PROVENANCE.json` records `releaseTag`,
-`version`, `commit`, `describe`, `dirty`, and the file list; `releaseTag` is the
-key the sync workflow compares on each run.
+`vendor/ofm/` 是从 `dsh-our-free-model` release tag 复制来的依赖闭包。它自
+包含，因此 action 可以在任何仓库运行，无需第二次 checkout。
+`vendor/ofm/PROVENANCE.json` 记录 `releaseTag`、`version`、`commit`、
+`describe`、`dirty` 和文件列表；`releaseTag` 是 sync workflow 每次比较的键。
 
 ```bash
-# Sync from a clean checkout of the release tag. A worktree keeps the local
-# main checkout free:
+# 从 release tag 的干净 checkout 同步。worktree 可让本地 main checkout 保持空闲：
 git -C ../dsh-our-free-model worktree add --detach ../.upstream-v2.9.0 v2.9.0
 node scripts/sync-vendor.mjs --source ../.upstream-v2.9.0 --tag v2.9.0
 
-# Fail on drift, including a stale file or a PROVENANCE releaseTag mismatch:
+# 检测漂移，包括过期文件和 PROVENANCE releaseTag 不匹配：
 node scripts/sync-vendor.mjs --check --source ../.upstream-v2.9.0 --tag v2.9.0
 
-# When done:
+# 完成后：
 git -C ../dsh-our-free-model worktree remove ../.upstream-v2.9.0
 ```
 
-The source must be clean and at a stable `--tag`. The script refuses a dirty
-tree, a non-`vX.Y.Z` tag, a tag whose `package.json` version differs, and a
-HEAD that is not the tag commit. It also verifies that every relative import
-in the closure resolves to another vendored file; a new upstream dependency
-fails the sync instead of shipping a runtime `MODULE_NOT_FOUND`. Stale `.js`
-files are removed, and `--check` reports them.
+源必须干净且位于稳定的 `--tag`。脚本会拒绝脏工作树、非 `vX.Y.Z` tag、
+`package.json` 版本与 tag 不一致，以及 HEAD 不是 tag commit 的情况。它还会
+验证闭包内每个相对 import 都解析到另一个 vendored 文件；新的上游依赖会让
+同步失败，而不是在运行时抛 `MODULE_NOT_FOUND`。过期的 `.js` 文件会被删除，
+`--check` 会报告它们。
 
-The tracker sorts the stable tags itself instead of trusting
-`/releases/latest`: upstream creates `*-macos-unofficial` releases after some
-stable releases, so "latest" can point at an unofficial build. Only
-`vX.Y.Z` releases are considered.
+tracker 自己排序稳定 tag，而不信任 `/releases/latest`：上游会在某些稳定
+release 后创建 `*-macos-unofficial` release，所以 "latest" 可能指向非官方
+构建。只考虑 `vX.Y.Z` release。
 
-Do not hand-edit the vendored files, especially `o2a.js`; the upstream gateway
-checks its prompt/tool assets byte-for-byte.
+不要手工编辑 vendored 文件，尤其是 `o2a.js`；上游网关会逐字节校验其
+prompt/tool 资产。
 
 ## License
 
-MIT. The vendored files are MIT, Copyright (c) 2026 Ebony-Vinyl. See `LICENSE`
-and `NOTICE`.
+MIT。vendored 文件为 MIT，Copyright (c) 2026 Ebony-Vinyl。见 `LICENSE` 和
+`NOTICE`。
