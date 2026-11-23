@@ -291,6 +291,9 @@ node scripts/sync-vendor.mjs --source ../.upstream-v2.9.0 --tag v2.9.0
 
 # Fail on drift, including a stale file or a PROVENANCE releaseTag mismatch:
 node scripts/sync-vendor.mjs --check --source ../.upstream-v2.9.0 --tag v2.9.0
+
+# When done:
+git -C ../dsh-our-free-model worktree remove ../.upstream-v2.9.0
 ```
 
 The source must be clean and at `--tag`. The script refuses a dirty tree, a tag
