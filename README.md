@@ -162,7 +162,12 @@ steps:
   "text": "PONG",
   "finish": "completed",
   "truncated": false,
-  "usage": { "inputTokens": 10696, "outputTokens": 4, "totalTokens": 10700 },
+  "usage": {
+    "inputTokens": 72,
+    "outputTokens": 4,
+    "totalTokens": 10956,
+    "cacheReadTokens": 10880
+  },
   "elapsedMs": 3873,
   "attempts": [
     { "lane": "auto", "model": "combo:gha", "ok": true, "status": null, "elapsedMs": 3873 }
@@ -178,6 +183,10 @@ steps:
 失败时 `ok` 为 `false`，并带 `code` 和 `message`。原始 dsh 事件流会写到
 `$RUNNER_TEMP/free-model-action/events.ndjson`，smoke workflow 会把它作为
 artifact 上传。
+
+`usage` 直接取自 dsh 的 status 事件。`inputTokens` 只计本次未命中的输入；
+`cacheReadTokens` 是命中的缓存。上面的示例里总计约 1.1 万 token，绝大部分是
+dsh 每次调用自带的系统提示和工具定义，而不是调用方写的 prompt。
 
 ### 失败码
 
@@ -301,7 +310,8 @@ workflow。先用 `lane=auto`，再分别跑 `kilo` 和 `opencode`。它会上�
 | `opencode`（`deepseek-v4.1-flash-free`） | `PONG` | 3.1s |
 
 使用的版本为 dsh `0.2.2-rc.5`、插件 `v2.9.0`；三个 job 均约 1 分钟（含
-npm 全局安装）。
+npm 全局安装）。删除旧实现后，`main` 上的 `45125515148` 再次以 `auto` 通过
+（`PONG`，2.7 秒，job 51 秒）。
 
 ## License
 
