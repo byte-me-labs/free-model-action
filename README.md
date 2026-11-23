@@ -291,7 +291,8 @@ A SHA pin cannot be moved by an upstream tag rewrite; the comment keeps the
 version readable. These releases run on the Node 24 action runtime, so they do
 not produce the Node 20 deprecation warning that the old `v4` pins did.
 Self-hosted runners need Actions Runner v2.327.1 or later; GitHub-hosted
-runners already have it.
+runners already have it. The v7 pins were re-verified on 2026-11-23 with a
+Kilo smoke and a `sync-upstream` dry run at `v2.8.9`.
 
 `.github/dependabot.yml` checks the pins weekly and opens one grouped PR. It
 does not touch `vendor/ofm/`: that is handled separately by
