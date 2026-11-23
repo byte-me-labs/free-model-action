@@ -1,11 +1,11 @@
 {
   "source": "https://github.com/Ebony-Vinyl/dsh-our-free-model",
-  "releaseTag": "v2.8.9",
-  "version": "2.8.9",
-  "commit": "38b29cd066bcb7a8e015ced418f0f6dcd0fbd8e5",
-  "describe": "v2.8.9",
+  "releaseTag": "v2.9.0",
+  "version": "2.9.0",
+  "commit": "b8c029b85503e5de7783be76f801a98225ca6682",
+  "describe": "v2.9.0",
   "dirty": false,
-  "syncedAt": "2026-11-20T12:00:00.000Z",
+  "syncedAt": "2026-11-23T05:49:40.199Z",
   "files": [
     "o2a.js",
     "upstream.js",
