@@ -126,6 +126,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "current=$current" >> "$GITHUB_OUTPUT"
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "upstream tag=$tag current=${current:-none} changed=$changed ($reason)"
 
       - name: Check out the upstream release
         if: steps.release.outputs.changed == 'true'
