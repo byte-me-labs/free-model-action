@@ -1,0 +1,183 @@
+name: 'Free Model Call'
+description: 'Call the OpenCode and Kilo free model lanes and return the answer as a JSON result'
+author: 'free-model-action'
+branding:
+  icon: 'cpu'
+  color: 'purple'
+
+inputs:
+  lane:
+    description: 'auto, kilo, or opencode. auto tries Kilo first, then OpenCode.'
+    required: false
+    default: 'auto'
+  model:
+    description: 'Model id. Requires lane=kilo or lane=opencode; auto picks one default per lane.'
+    required: false
+    default: ''
+  prompt:
+    description: 'Prompt text. Use prompt-file for large inputs such as diffs.'
+    required: false
+    default: ''
+  prompt-file:
+    description: 'Path to a UTF-8 prompt file. Takes precedence over prompt.'
+    required: false
+    default: ''
+  system:
+    description: 'Optional system instruction.'
+    required: false
+    default: ''
+  system-file:
+    description: 'Path to a UTF-8 system instruction file. Takes precedence over system.'
+    required: false
+    default: ''
+  max-output-tokens:
+    description: 'Output token cap.'
+    required: false
+    default: '1200'
+  timeout-ms:
+    description: 'Per-lane timeout in milliseconds.'
+    required: false
+    default: '180000'
+  max-input-chars:
+    description: 'Prompt character cap applied after secret redaction.'
+    required: false
+    default: '60000'
+  soft-fail:
+    description: 'Exit 0 when every lane fails. Default true so an AI step does not break CI.'
+    required: false
+    default: 'true'
+  setup-node:
+    description: 'Install Node 22 with actions/setup-node.'
+    required: false
+    default: 'true'
+  install-bun:
+    description: 'Install Bun with oven-sh/setup-bun. The OpenCode lane requires Bun.'
+    required: false
+    default: 'true'
+
+outputs:
+  ok:
+    description: 'true when a lane returned non-empty text.'
+    value: ${{ steps.call.outputs.ok }}
+  lane:
+    description: 'Lane that answered: kilo or opencode.'
+    value: ${{ steps.call.outputs.lane }}
+  model:
+    description: 'Model that answered.'
+    value: ${{ steps.call.outputs.model }}
+  text:
+    description: 'Answer text.'
+    value: ${{ steps.call.outputs.text }}
+  finish:
+    description: 'Upstream finish reason.'
+    value: ${{ steps.call.outputs.finish }}
+  result-file:
+    description: 'Absolute path to the result JSON.'
+    value: ${{ steps.call.outputs.result-file }}
+  comment-file:
+    description: 'Absolute path to a sanitized comment body when ok=true; empty otherwise.'
+    value: ${{ steps.emit.outputs.comment-file }}
+
+runs:
+  using: composite
+  steps:
+    - id: node
+      if: ${{ inputs.setup-node == 'true' }}
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: '22'
+
+    - id: bun
+      if: ${{ inputs.install-bun == 'true' }}
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: 'latest'
+
+    - id: call
+      shell: bash
+      env:
+        INPUT_LANE: ${{ inputs.lane }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_PROMPT_FILE: ${{ inputs.prompt-file }}
+        INPUT_SYSTEM: ${{ inputs.system }}
+        INPUT_SYSTEM_FILE: ${{ inputs.system-file }}
+        INPUT_MAX_OUTPUT_TOKENS: ${{ inputs.max-output-tokens }}
+        INPUT_TIMEOUT_MS: ${{ inputs.timeout-ms }}
+        INPUT_MAX_INPUT_CHARS: ${{ inputs.max-input-chars }}
+        INPUT_SOFT_FAIL: ${{ inputs.soft-fail }}
+        DSH_HOME: ${{ runner.temp }}/free-model-action/dsh
+      run: |
+        set -uo pipefail
+        umask 077
+        out_dir="${RUNNER_TEMP:-/tmp}/free-model-action"
+        DSH_HOME="${DSH_HOME:-$out_dir/dsh}"
+        export DSH_HOME
+        mkdir -p "$out_dir" "$DSH_HOME"
+        cleanup() { rm -f "$out_dir/prompt.txt" "$out_dir/system.txt"; }
+        trap cleanup EXIT
+
+        args=(
+          --live
+          --out "$out_dir/result.json"
+          --lane "$INPUT_LANE"
+          --max-output-tokens "$INPUT_MAX_OUTPUT_TOKENS"
+          --timeout-ms "$INPUT_TIMEOUT_MS"
+          --max-input-chars "$INPUT_MAX_INPUT_CHARS"
+        )
+
+        if [ -n "$INPUT_MODEL" ]; then
+          args+=(--model "$INPUT_MODEL")
+        fi
+
+        if [ -n "$INPUT_PROMPT_FILE" ]; then
+          args+=(--prompt-file "$INPUT_PROMPT_FILE")
+        else
+          printf '%s' "$INPUT_PROMPT" > "$out_dir/prompt.txt"
+          args+=(--prompt-file "$out_dir/prompt.txt")
+        fi
+
+        if [ -n "$INPUT_SYSTEM_FILE" ]; then
+          args+=(--system-file "$INPUT_SYSTEM_FILE")
+        elif [ -n "$INPUT_SYSTEM" ]; then
+          printf '%s' "$INPUT_SYSTEM" > "$out_dir/system.txt"
+          args+=(--system-file "$out_dir/system.txt")
+        fi
+
+        if [ "$INPUT_SOFT_FAIL" = "true" ]; then
+          args+=(--soft-fail)
+        else
+          args+=(--strict)
+        fi
+
+        set +e
+        node "$GITHUB_ACTION_PATH/scripts/gha-call.mjs" "${args[@]}"
+        code=$?
+        set -e
+
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+        # Emit outputs and the job summary even when the call failed, so the
+        # caller can inspect `ok` and the attempt table instead of a bare red X.
+        node "$GITHUB_ACTION_PATH/scripts/emit-result.mjs" \
+          --result "$out_dir/result.json" \
+          --summary \
+          --comment-file "$out_dir/comment.md" || true
+
+        exit 0
+
+    - id: emit
+      shell: bash
+      run: |
+        out_dir="${RUNNER_TEMP:-/tmp}/free-model-action"
+        if [ -f "$out_dir/comment.md" ]; then
+          echo "comment-file=$out_dir/comment.md" >> "$GITHUB_OUTPUT"
+        else
+          echo "comment-file=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Propagate the lane exit code
+      shell: bash
+      env:
+        CALL_EXIT_CODE: ${{ steps.call.outputs.exit-code }}
+      run: exit "${CALL_EXIT_CODE:-2}"

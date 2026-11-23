@@ -1,0 +1,22 @@
+{
+  "source": "https://github.com/Ebony-Vinyl/dsh-our-free-model",
+  "version": "2.9.0",
+  "commit": "f67e7a1",
+  "syncedAt": "2026-11-23T05:11:23.005Z",
+  "files": [
+    "o2a.js",
+    "upstream.js",
+    "store.js",
+    "open-external.js",
+    "bun-fetch.js",
+    "egress.js",
+    "http.js",
+    "kilo.js",
+    "stream.js"
+  ],
+  "notes": [
+    "Vendored dependency closure of the OpenCode/Kilo wire layer.",
+    "o2a.js is generated upstream; do not hand-edit it.",
+    "Run scripts/sync-vendor.mjs after updating dsh-our-free-model."
+  ]
+}

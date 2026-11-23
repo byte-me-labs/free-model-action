@@ -1,0 +1,16 @@
+{
+  "name": "free-model-action",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GitHub Action and CLI for the OpenCode and Kilo free model lanes",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "test": "node scripts/gha-call-test.mjs",
+    "smoke": "node scripts/gha-call.mjs --live --lane auto --prompt \"Do not use tools. Reply with exactly: PONG\" --max-output-tokens 64",
+    "sync-vendor": "node scripts/sync-vendor.mjs"
+  }
+}

@@ -1,0 +1,12 @@
+free-model-action
+=================
+
+This project vendors selected source files from dsh-our-free-model 2.9.0
+(commit f67e7a1), Copyright (c) 2026 Ebony-Vinyl.
+
+Upstream: https://github.com/Ebony-Vinyl/dsh-our-free-model
+License:  MIT (see LICENSE in this repository)
+
+The vendored files live under vendor/ofm/. Their exact versions and file list
+are recorded in vendor/ofm/PROVENANCE.json. Do not edit the vendored files by
+hand; run scripts/sync-vendor.mjs instead.

@@ -1,0 +1,78 @@
+name: smoke
+
+# Manual, one-shot verification of the free lanes from a GitHub-hosted runner.
+# This is intentionally the only workflow that spends lane quota: a successful
+# run here is the go/no-go signal for adding PR-review or issue-triage jobs.
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: 'auto, kilo, or opencode'
+        required: true
+        type: choice
+        default: auto
+        options: [auto, kilo, opencode]
+      model:
+        description: 'Optional model id; leave empty to let the lane pick its default'
+        required: false
+        type: string
+        default: ''
+      prompt:
+        description: 'Prompt to send'
+        required: true
+        type: string
+        default: 'Do not use tools. Reply with exactly: PONG'
+      max-output-tokens:
+        description: 'Output token cap'
+        required: true
+        type: string
+        default: '64'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: free-model-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: smoke / ${{ inputs.lane }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - id: call
+        uses: ./
+        with:
+          lane: ${{ inputs.lane }}
+          model: ${{ inputs.model }}
+          prompt: ${{ inputs.prompt }}
+          max-output-tokens: ${{ inputs.max-output-tokens }}
+          soft-fail: 'false'
+
+      - name: Show the lane result
+        if: always()
+        env:
+          OK: ${{ steps.call.outputs.ok }}
+          LANE: ${{ steps.call.outputs.lane }}
+          MODEL: ${{ steps.call.outputs.model }}
+          FINISH: ${{ steps.call.outputs.finish }}
+          RESULT_FILE: ${{ steps.call.outputs.result-file }}
+        run: |
+          echo "ok=$OK"
+          echo "lane=$LANE"
+          echo "model=$MODEL"
+          echo "finish=$FINISH"
+          echo "result=$RESULT_FILE"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: free-model-smoke-${{ inputs.lane }}
+          path: ${{ runner.temp }}/free-model-action/result.json
+          if-no-files-found: warn
+          retention-days: 7
