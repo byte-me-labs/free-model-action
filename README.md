@@ -43,7 +43,7 @@ jobs:
   summarize:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - id: ai
         uses: OWNER/free-model-action@v1
@@ -68,7 +68,7 @@ ignore commands inside it:
 
 ```yaml
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v7
     with:
       ref: ${{ github.event.pull_request.base.sha }}
       persist-credentials: false
@@ -274,6 +274,29 @@ GitHub-hosted verification on 2026-11-23 (`ubuntu-latest`, runner image
 runs selected their model from the live listing (`modelSource: listing`). The
 release tracker was exercised on the same day: a dry run at `v2.8.9`, an
 up-to-date automatic run, and a real commit/push back to `v2.9.0`.
+
+## Action versions
+
+The composite action and both workflows pin every third-party action to a full
+commit SHA, with a trailing version comment:
+
+| Action | Pin |
+| --- | --- |
+| `actions/checkout` | `v7.0.1` |
+| `actions/setup-node` | `v7.1.0` |
+| `actions/upload-artifact` | `v7.0.2` |
+| `oven-sh/setup-bun` | `v2.2.0` |
+
+A SHA pin cannot be moved by an upstream tag rewrite; the comment keeps the
+version readable. These releases run on the Node 24 action runtime, so they do
+not produce the Node 20 deprecation warning that the old `v4` pins did.
+
+`.github/dependabot.yml` checks the pins weekly and opens one grouped PR. It
+does not touch `vendor/ofm/`: that is handled separately by
+`sync-upstream.yml`. To upgrade manually, resolve the tag to its commit SHA
+(for example `git ls-remote https://github.com/actions/checkout refs/tags/v7.0.1`),
+update the SHA and the `# vX.Y.Z` comment, then run `actionlint` and `npm test`.
+Keep the comment: Dependabot uses it to keep the pin current.
 
 ## Vendoring
 
