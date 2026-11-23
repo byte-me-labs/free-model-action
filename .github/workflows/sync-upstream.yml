@@ -97,14 +97,20 @@ jobs:
 
           dry_run="${INPUT_DRY_RUN:-false}"
           changed=true
-          reason="new upstream release"
+          if [ "$dry_run" = "true" ]; then
+            reason="dry-run"
+          elif [ -n "${INPUT_TAG:-}" ]; then
+            reason="manual target"
+          else
+            reason="new upstream release"
+          fi
 
           if [ -n "$current" ] && [ "$current" = "$tag" ] && [ "$dry_run" != "true" ]; then
             changed=false
             reason="already vendored"
           elif [ -z "${INPUT_TAG:-}" ] && [ -n "$current" ]; then
             # Automatic runs must never downgrade main. A manual tag may be a
-            # deliberate rollback, so only enforce this for scheduled runs.
+            # deliberate rollback, so only enforce this for automatic runs.
             newest=$(printf '%s\n%s\n' "$current" "$tag" | sort -V | tail -n 1)
             if [ "$newest" != "$tag" ]; then
               changed=false
@@ -117,7 +123,7 @@ jobs:
             echo ""
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| Latest stable | \`$tag\` |"
+            echo "| Upstream tag | \`$tag\` |"
             echo "| Vendored | \`${current:-none}\` |"
             echo "| Dry run | \`$dry_run\` |"
             echo "| Action | $reason |"
