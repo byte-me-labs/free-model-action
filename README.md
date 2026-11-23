@@ -252,8 +252,13 @@ only workflow that spends quota. Run it with `lane=auto` first, then `kilo` and
 
 Local verification on 2026-11-23 (Windows, Node 24.21, Bun 1.4.5) returned
 `PONG` from both lanes and exercised the auto fallback by pointing
-`OUR_FREE_MODEL_KILO_BASE` at a dead port. GitHub-hosted runner feasibility is
-what the smoke workflow still has to establish.
+`OUR_FREE_MODEL_KILO_BASE` at a dead port.
+
+GitHub-hosted verification on 2026-11-23 (`ubuntu-latest`, runner image
+`ubuntu-26.04`) also returned `PONG` from both lanes: `lane=auto` answered on
+Kilo (`kilo-auto/free`, 1.3s) and `lane=opencode` answered on
+`deepseek-v4.1-flash-free` with Bun 1.4.5 (1.8s). Both runs selected their model
+from the live listing (`modelSource: listing`).
 
 ## Vendoring
 
